@@ -1,0 +1,27 @@
+# Dane meczu i zawodników (dodatkowy kontekst dla raportu).
+# Para ze start_side: near to ta, która w PIERWSZYM punkcie fragmentu stoi bliżej kamery.
+title: "Finał – przykład"
+event: "Premier Padel – przykład"
+focus_team: "Para Niebiescy"   # dla kogo wskazówki; usuń, żeby dostać wskazówki dla obu par
+set_starts_s: []               # opcjonalnie: początki setów w sekundach fragmentu, np. [0, 2710, 5320]
+
+teams:
+  - name: "Para Niebiescy"
+    start_side: near
+    players:
+      - name: "Zawodnik 1"
+        hand: right
+        lane: drive
+      - name: "Zawodnik 2"
+        hand: left
+        lane: reves
+        notes: "mocny smecz x3 (por tres)"
+  - name: "Para Czerwoni"
+    start_side: far
+    players:
+      - name: "Zawodnik 3"
+        hand: right
+        lane: drive
+      - name: "Zawodnik 4"
+        hand: right
+        lane: reves
