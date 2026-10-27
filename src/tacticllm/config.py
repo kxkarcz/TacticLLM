@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,6 +6,11 @@ class Settings(BaseSettings):
     """Ustawienia z zmiennych środowiskowych (prefiks TACTIC_) lub pliku .env."""
 
     model_config = SettingsConfigDict(env_prefix="TACTIC_", env_file=".env", extra="ignore")
+
+    # klucze bez prefiksu TACTIC_ – biblioteki szukają ich w zmiennych środowiskowych,
+    # a nie w .env, więc przekazujemy je jawnie
+    anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+    google_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"))
 
     # raport i czat: "anthropic" (Claude, jedno wywołanie na mecz) albo "ollama" (lokalnie, za darmo)
     report_provider: str = "anthropic"
@@ -15,7 +21,7 @@ class Settings(BaseSettings):
 
     # adnotacje punktów: "ollama" (lokalnie, za darmo) albo "gemini" (API Google)
     annotator: str = "ollama"
-    video_model: str = "gemini-2.5-flash"
+    video_model: str = "gemini-3.6-flash"  # darmowy plan: 20 zapytań dziennie na model
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5vl:7b"
     ollama_fps: float = 3.0  # ile klatek na sekundę punktu ogląda model (cały punkt, od serwisu do końca)

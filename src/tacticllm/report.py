@@ -64,7 +64,7 @@ def _model():
                       options={"num_ctx": settings.ollama_report_ctx, "temperature": 0.3})
     from agno.models.anthropic import Claude
 
-    return Claude(id=settings.report_model)
+    return Claude(id=settings.report_model, api_key=settings.anthropic_api_key or None)
 
 
 def _match_text(info: MatchInfo) -> str:
