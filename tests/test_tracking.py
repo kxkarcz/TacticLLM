@@ -76,6 +76,41 @@ def test_build_segments_empty():
     assert build_segments([(0.0, False), (0.1, False)], max_gap_s=0.3) == []
 
 
+def moving_segment(pattern, start=100.0):
+    """pattern: jeden znak na sekundę, 'r' = wymiana (3 m/s), '.' = stanie."""
+    from tacticllm.models import PlayerObs, Segment
+
+    obs, x = [], 5.0
+    for sec, kind in enumerate(pattern):
+        for k in range(10):
+            x = x + 0.3 if kind == "r" and x < 9 else (x - 0.3 if kind == "r" else x)
+            obs.append(PlayerObs(t=round(start + sec + k * 0.1, 3), side="near", lane="drive",
+                                 x=x, y=15, conf=0.9, color=[0, 0, 0]))
+    return Segment(index=0, start_s=start, end_s=start + len(pattern) - 0.1, observations=obs)
+
+
+def test_two_points_in_one_shot_are_split():
+    from tacticllm.tracking import pause_splits, split_on_pauses
+
+    seg = moving_segment("...rrrrrrrr....rrrrrrr")  # serwis, wymiana, przerwa, serwis, wymiana
+    assert pause_splits(seg) == [111.0]
+    parts = split_on_pauses([seg])
+    assert [(p.index, p.start_s, p.end_s) for p in parts] == [(0, 100.0, 111.0), (1, 111.0, 121.9)]
+    assert sum(len(p.observations) for p in parts) == len(seg.observations)
+
+
+@pytest.mark.parametrize("pattern", [
+    "....rrrrrrrrrrrr",  # zwykły punkt: ustawienie do serwisu i wymiana
+    "rrrrrrrr..rrrrrrr",  # krótka chwila spokoju w wymianie (np. wysoki lob)
+    "rr....rrrrrrrr",  # za krótki ruch przed przerwą (zawodnicy schodzą się do serwisu)
+    "rrrrrrrrr.....",  # koniec punktu i przerwa do końca ujęcia
+])
+def test_single_point_is_not_split(pattern):
+    from tacticllm.tracking import pause_splits
+
+    assert pause_splits(moving_segment(pattern)) == []
+
+
 def test_main_view_detector():
     pytest.importorskip("cv2")
     from tacticllm.tracking import MainViewDetector

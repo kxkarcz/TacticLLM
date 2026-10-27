@@ -94,6 +94,74 @@ def build_segments(main_flags: list[tuple[float, bool]], max_gap_s: float) -> li
     return [(a, b) for a, b in spans]
 
 
+QUIET_SPEED_MS = 1.0  # wolniej = zawodnicy stoją / spacerują (ustawienie do serwisu, przerwa)
+MIN_QUIET_S = 3  # tyle sekund ciszy między dwiema wymianami = nowy punkt
+MIN_ACTIVE_S = 5  # tyle sekund ruchu musi mieć wymiana przed i po przerwie
+
+
+def speed_profile(observations: list[PlayerObs], max_speed: float = 9.0) -> dict[int, float]:
+    """Średnia prędkość zawodników (m/s) w każdej pełnej sekundzie."""
+    tracks: dict[tuple[str, str], list[PlayerObs]] = {}
+    for o in observations:
+        tracks.setdefault((o.side, o.lane), []).append(o)
+    speeds: dict[int, list[float]] = {}
+    for tr in tracks.values():
+        tr.sort(key=lambda o: o.t)
+        for a, b in zip(tr, tr[1:]):
+            dt = b.t - a.t
+            v = float(np.hypot(b.x - a.x, b.y - a.y)) / dt if dt > 0 else 0.0
+            if 0 < dt <= 0.3 and v <= max_speed:  # większe skoki to błędy detekcji
+                speeds.setdefault(int(a.t), []).append(v)
+    return {t: float(np.mean(v)) for t, v in speeds.items()}
+
+
+def pause_splits(seg: Segment) -> list[float]:
+    """Momenty, w których w jednym ujęciu kamery zaczyna się kolejny punkt.
+
+    Realizator nie zawsze przełącza kamerę między punktami. Każdy punkt zaczyna się jednak
+    od kilku sekund prawie bez ruchu (ustawienie do serwisu), więc dzielimy ujęcie na
+    przerwie >= MIN_QUIET_S, przed którą i po której jest co najmniej MIN_ACTIVE_S ruchu.
+    """
+    speed = speed_profile(seg.observations)
+    seconds = range(int(seg.start_s), int(seg.end_s) + 1)
+    active = {t: speed.get(t, 0.0) >= QUIET_SPEED_MS for t in seconds}
+
+    quiet_runs: list[int] = []  # początki przerw
+    run_start = None
+    for t in [*seconds, None]:
+        if t is not None and not active[t]:
+            run_start = t if run_start is None else run_start
+            continue
+        if run_start is not None and (t if t is not None else seconds[-1] + 1) - run_start >= MIN_QUIET_S:
+            quiet_runs.append(run_start)
+        run_start = None
+
+    def active_between(a: float, b: float) -> int:
+        return sum(1 for t in seconds if a <= t < b and active[t])
+
+    splits: list[float] = []
+    for i, start in enumerate(quiet_runs):
+        prev = splits[-1] if splits else seg.start_s
+        nxt = quiet_runs[i + 1] if i + 1 < len(quiet_runs) else seg.end_s + 1
+        if active_between(prev, start) >= MIN_ACTIVE_S and active_between(start, nxt) >= MIN_ACTIVE_S:
+            splits.append(float(start))
+    return splits
+
+
+def split_on_pauses(segments: list[Segment]) -> list[Segment]:
+    """Dzieli ujęcia zawierające kilka punktów; numeruje segmenty od nowa."""
+    result: list[Segment] = []
+    for seg in segments:
+        bounds = [seg.start_s, *pause_splits(seg), seg.end_s]
+        for a, b in zip(bounds, bounds[1:]):
+            last = b == seg.end_s
+            result.append(Segment(
+                index=len(result), start_s=a, end_s=b,
+                observations=[o for o in seg.observations if a <= o.t < b or (last and o.t == b)],
+            ))
+    return result
+
+
 def track(video: Path, calib: Calibration, reference_frame: np.ndarray) -> list[Segment]:
     from ultralytics import YOLO
 
@@ -135,5 +203,6 @@ def track(video: Path, calib: Calibration, reference_frame: np.ndarray) -> list[
             pending = next(obs_iter, None)
         segments.append(seg)
 
+    segments = split_on_pauses(segments)
     assign_teams(segments)
     return segments
