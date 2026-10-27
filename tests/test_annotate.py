@@ -47,12 +47,70 @@ def test_annotation_rejects_unknown_tactic():
         PointAnnotation(is_rally=True, winner_side="near", ending="winner", last_shot="smash", tactics_near=["tiki_taka"])
 
 
-def test_context_size_grows_with_frames(monkeypatch):
-    monkeypatch.setattr(annotate_mod.settings, "ollama_frame_width", 896)
+def test_context_size_grows_with_frames():
     annotator = OllamaAnnotator.__new__(OllamaAnnotator)  # bez połączenia z Ollamą
-    small, big = annotator._context_size(4), annotator._context_size(64)
+    small, big = annotator._context_size(4), annotator._context_size(24)
     assert small == 8192
-    assert big % 4096 == 0 and big >= 64 * (896 * 504) / (28 * 28)
+    # zmierzone: 24 klatki qwen2.5vl w Ollamie to ~25 tys. tokenów
+    assert big % 4096 == 0 and big >= 24 * 1040 + 1500
+
+
+def test_gemini_retries_on_rate_limit(monkeypatch):
+    errors = pytest.importorskip("google.genai.errors")
+    from tacticllm.annotate import GeminiAnnotator
+
+    calls = []
+
+    class Models:
+        def generate_content(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise errors.ClientError(429, {"error": {"message": "quota", "status": "RESOURCE_EXHAUSTED"}})
+            if len(calls) == 2:
+                raise errors.ServerError(503, {"error": {"message": "high demand", "status": "UNAVAILABLE"}})
+            return "ok"
+
+    annotator = GeminiAnnotator.__new__(GeminiAnnotator)  # bez klucza i połączenia
+    annotator.client = type("Client", (), {"models": Models()})()
+    monkeypatch.setattr(annotate_mod.time, "sleep", lambda s: None)
+    assert annotator._generate(model="m") == "ok" and len(calls) == 3
+
+
+def test_gemini_does_not_retry_other_errors(monkeypatch):
+    errors = pytest.importorskip("google.genai.errors")
+    from tacticllm.annotate import GeminiAnnotator
+
+    class Models:
+        def generate_content(self, **kwargs):
+            raise errors.ClientError(400, {"error": {"message": "bad", "status": "INVALID_ARGUMENT"}})
+
+    annotator = GeminiAnnotator.__new__(GeminiAnnotator)
+    annotator.client = type("Client", (), {"models": Models()})()
+    with pytest.raises(errors.ClientError):
+        annotator._generate(model="m")
+
+
+def test_gemini_daily_quota_stops_whole_run(tmp_path, monkeypatch):
+    errors = pytest.importorskip("google.genai.errors")
+    from tacticllm.annotate import GeminiAnnotator
+
+    calls = []
+
+    class Models:
+        def generate_content(self, **kwargs):
+            calls.append(kwargs)
+            raise errors.ClientError(429, {"error": {
+                "message": "Generate content requests per day limit exceeded on Free Tier",
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}})
+
+    gemini = GeminiAnnotator.__new__(GeminiAnnotator)
+    gemini.client = type("Client", (), {"models": Models()})()
+    monkeypatch.setattr(annotate_mod, "make_annotator", lambda *a, **k: lambda seg: gemini._generate(model="m"))
+    monkeypatch.setattr(annotate_mod.time, "sleep", lambda s: pytest.fail("nie czekamy na limit dzienny"))
+
+    result = annotate(None, segs(3), tmp_path / "clips", tmp_path / "out.json", backend="gemini")
+    assert result == {} and len(calls) == 1  # bez ponowień i bez kolejnych punktów
 
 
 def test_annotate_saves_progress_resumes_and_skips_errors(tmp_path, monkeypatch):

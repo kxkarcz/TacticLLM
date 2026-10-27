@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from pathlib import Path
 
 from rich.progress import track
@@ -62,13 +63,38 @@ Kamera transmisyjna stoi za kortem.
 Nie zgaduj – gdy nie widać, użyj "unknown", null albo pustej listy. Odpowiedz wyłącznie JSON-em."""
 
 
+class DailyQuotaExceeded(RuntimeError):
+    """Wyczerpany dzienny limit darmowego planu – dalsze zapytania nie mają sensu."""
+
+
 class GeminiAnnotator:
     def __init__(self, video: Path, clips_dir: Path, pad_s: float):
         from google import genai
+        from google.genai import types
 
-        self.client = genai.Client()  # klucz z GOOGLE_API_KEY / GEMINI_API_KEY
+        # GOOGLE_API_KEY / GEMINI_API_KEY; limit czasu, bo przeciążony serwer potrafi nie odpowiadać wcale
+        self.client = genai.Client(api_key=settings.google_api_key or None,
+                                   http_options=types.HttpOptions(timeout=180_000))
         self.video, self.clips_dir, self.pad_s = video, clips_dir, pad_s
         clips_dir.mkdir(parents=True, exist_ok=True)
+
+    retry_codes = (429, 500, 503, 504)  # limit darmowego planu i chwilowe przeciążenie serwerów
+
+    def _generate(self, **kwargs):
+        """Przy limicie zapytań (429) albo przeciążeniu (5xx) czekamy i próbujemy ponownie."""
+        from google.genai import errors
+
+        for attempt in range(5):
+            try:
+                return self.client.models.generate_content(**kwargs)
+            except errors.APIError as exc:
+                if exc.code == 429 and "PerDay" in str(exc):
+                    raise DailyQuotaExceeded(f"Dzienny limit zapytań do {kwargs.get('model')} wyczerpany") from exc
+                if exc.code not in self.retry_codes or attempt == 4:
+                    raise
+                wait = 30 * (attempt + 1)
+                print(f"Gemini: błąd {exc.code} – czekam {wait} s i ponawiam")
+                time.sleep(wait)
 
     def __call__(self, seg: Segment) -> PointAnnotation:
         from google.genai import types
@@ -76,7 +102,7 @@ class GeminiAnnotator:
         clip = self.clips_dir / f"point_{seg.index:04d}.mp4"
         if not clip.exists():
             cut(self.video, clip, max(0.0, seg.start_s - self.pad_s), seg.end_s + self.pad_s, max_height=720)
-        response = self.client.models.generate_content(
+        response = self._generate(
             model=settings.video_model,
             contents=types.Content(parts=[
                 types.Part(
@@ -107,7 +133,9 @@ def frame_times(start: float, end: float, fps: float, max_frames: int) -> list[f
 class OllamaAnnotator:
     """Lokalny model wizyjny przez Ollamę – bez klucza API i bez kosztów."""
 
-    tokens_per_frame_px = 28 * 28  # Qwen-VL: 1 token na łatkę 28x28 px
+    # Ollama sama skaluje obraz do stałego rozmiaru: ~1040 tokenów na klatkę (qwen2.5vl, zmierzone),
+    # niezależnie od ollama_frame_width
+    tokens_per_frame = 1100
 
     def __init__(self, video: Path, pad_s: float):
         import ollama
@@ -135,9 +163,7 @@ class OllamaAnnotator:
         return frames
 
     def _context_size(self, n_frames: int) -> int:
-        w = settings.ollama_frame_width
-        per_frame = (w * w * 9 / 16) / self.tokens_per_frame_px
-        needed = int(n_frames * per_frame) + 3000  # + prompt i odpowiedź
+        needed = n_frames * self.tokens_per_frame + 3000  # + prompt i odpowiedź
         return max(8192, math.ceil(needed / 4096) * 4096)
 
     def __call__(self, seg: Segment) -> PointAnnotation:
@@ -176,6 +202,9 @@ def annotate(video: Path, segments: list[Segment], clips_dir: Path, out_json: Pa
             continue
         try:
             ann = annotator(seg)
+        except DailyQuotaExceeded as exc:
+            print(f"{exc} – przerywam. Uruchom tę samą komendę jutro, gotowe punkty zostaną pominięte.")
+            break
         except Exception as exc:  # pojedynczy punkt nie powinien zatrzymać całości
             print(f"Punkt {seg.index}: błąd adnotacji ({exc}) – pomijam")
             continue
