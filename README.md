@@ -2,9 +2,9 @@
 
 Analiza taktyczna meczów padla z wideo (np. transmisji z YouTube) i raport dla trenera generowany przez LLM.
 
-Przebieg: **pobranie → kalibracja kortu → wykrywanie zawodników (YOLO) → opis punktów modelem wizyjnym → statystyki → raport / czat**.
+Przebieg: **pobranie → kalibracja kortu → wykrywanie zawodników (YOLO) → wynik z tablicy → opis punktów modelem wizyjnym → statystyki → raport / czat**.
 
-Program pokazuje, gdzie stali zawodnicy (siatka / tył, przejęcia siatki, mapy cieplne) i – po kroku `annotate` – co grali: kto wygrał punkt, jak się skończył, jakie taktyki stosowała każda para i z jakim skutkiem.
+Program pokazuje, gdzie stali zawodnicy (siatka / tył, przejęcia siatki, mapy cieplne) – po krokach `scores` i `annotate` – kto wygrał punkt (z tablicy wyników) i co grali: jak się skończył, jakie taktyki stosowała każda para i z jakim skutkiem.
 
 ## Wymagania
 
@@ -96,6 +96,7 @@ Kroki, które już mają wynik w katalogu (wideo, kalibracja, segmenty), są pom
 tacticllm download "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:45:00 -r runs/final
 tacticllm calibrate -r runs/final --at 0:10
 tacticllm track -r runs/final
+tacticllm scores -r runs/final --box "85,50,510,132" --match mecz.yaml
 tacticllm points -r runs/final
 tacticllm annotate -r runs/final
 tacticllm stats -r runs/final --match mecz.yaml
@@ -105,12 +106,13 @@ tacticllm chat -r runs/final
 
 1. **download** – pobiera film albo tylko fragment (link obsługiwany przez yt-dlp lub ścieżka do pliku).
 2. **calibrate** – na klatce z czasu `--at` (musi to być widok z głównej kamery!) klikasz 4 narożniki podłogi kortu: dalszy-lewy, dalszy-prawy, bliższy-prawy, bliższy-lewy. Backspace cofa, Enter zapisuje. Gdy narożniki są poza kadrem, użyj `--kind service` i kliknij końce linii serwisowych przy ścianach. Bez okna: `--corners "x,y;x,y;x,y;x,y"`. Sprawdź `calibration_preview.jpg` – linie kortu muszą pokrywać się z obrazem.
-3. **track** – wykrywa zawodników na ujęciach z głównej kamery i dzieli film na punkty (`segments.json`).
-4. **points** – lista wykrytych punktów do szybkiej weryfikacji.
-5. **annotate** – model wizyjny opisuje każdy punkt (`annotations.json`). `--limit 10 --model qwen3-vl:8b-instruct --out ann_qwen3.json` pozwala porównać modele na kilku punktach.
-6. **stats** – statystyki (`stats.json`) i mapy cieplne (`heatmaps/`).
-7. **report** – raport taktyczny w Markdown (`report.md`).
-8. **chat** – rozmowa z agentem o meczu, np. „dlaczego przegrali 2. seta?”.
+3. **track** – wykrywa zawodników na ujęciach z głównej kamery i dzieli film na punkty (`segments.json`). Gdy realizator nie przełączy kamery między punktami, ujęcie jest dzielone na przerwie przed kolejnym serwisem.
+4. **scores** – odczytuje tablicę wyników przed każdym punktem (lokalnie, `qwen3-vl:8b-instruct` w Ollamie) i ustala zwycięzcę punktu (`scores.json`). `--box` to prostokąt z grafiką wyniku w pikselach klatki (x1,y1,x2,y2 – zapamiętywany); bez niego model dostaje całą klatkę. Wiersze tablicy są dopasowywane do par po nazwiskach z pliku meczu, więc `--match` jest tu potrzebne. Ten zwycięzca ma pierwszeństwo przed oceną modelu z `annotate`.
+5. **points** – lista wykrytych punktów do szybkiej weryfikacji.
+6. **annotate** – model wizyjny opisuje każdy punkt: przebieg, zakończenie i taktyki (`annotations.json`). Najlepiej wypada Gemini (`--backend gemini`, darmowy plan: 20 zapytań dziennie na model; po wyczerpaniu limitu uruchom tę samą komendę następnego dnia). `--limit 10 --model qwen3-vl:8b-instruct --out ann_qwen3.json` pozwala porównać modele na kilku punktach.
+7. **stats** – statystyki (`stats.json`) i mapy cieplne (`heatmaps/`).
+8. **report** – raport taktyczny w Markdown (`report.md`).
+9. **chat** – rozmowa z agentem o meczu, np. „dlaczego przegrali 2. seta?”.
 
 ### Pliki w katalogu analizy
 
@@ -119,16 +121,17 @@ tacticllm chat -r runs/final
 | `video.mp4` | analizowany fragment |
 | `calibration.json`, `reference.jpg`, `calibration_preview.jpg` | kalibracja kortu |
 | `segments.json` | punkty i pozycje zawodników (metry) |
+| `scores.json` | wynik z tablicy przed każdym punktem i zwycięzca punktu |
 | `annotations.json` | opisy punktów z modelu wizyjnego |
 | `stats.json`, `heatmaps/` | statystyki i mapy cieplne |
 | `report.md` | raport dla trenera |
 
 ## Ograniczenia
 
-- Brak śledzenia piłki – wynik i przebieg punktu pochodzą wyłącznie z modelu wizyjnego.
+- Brak śledzenia piłki – zwycięzca punktu pochodzi z tablicy wyników (`scores`), a przebieg i taktyki z modelu wizyjnego (`annotate`). Na próbnym fragmencie (18 punktów) tablica dała 18/18, Gemini ok. 80%, lokalne modele 7–8B ok. 50%.
 - „drive” / „revés” to **pozycja** na korcie, a nie konkretny zawodnik – po zamianie stron w trakcie wymiany statystyki obu się mieszają.
 - Ujęcia głównej kamery są rozpoznawane przez porównanie z klatką z kalibracji; zmiana kamery lub oświetlenia może zgubić punkty.
-- Bez `annotate` przerwy i powtórki z widokiem głównej kamery liczą się jako punkty, a raport nie wie, kto wygrywał.
+- Bez `scores` i `annotate` przerwy i powtórki z widokiem głównej kamery liczą się jako punkty, a raport nie wie, kto wygrywał.
 
 ## Testy
 

@@ -109,15 +109,18 @@ def set_of(seg: Segment, ann: PointAnnotation | None, info: MatchInfo) -> int:
     return max([i + 1 for i, s in enumerate(starts) if seg.start_s >= s], default=1)
 
 
-def build_points(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo) -> list[dict]:
+def build_points(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo,
+                 scores: dict[int, str] | None = None) -> list[dict]:
+    """scores: zwycięzcy z tablicy wyników – pewniejsi niż ocena modelu wizyjnego, więc mają pierwszeństwo."""
+    scores = scores or {}
     points = []
     for seg in segments:
         ann = annotations.get(seg.index)
-        if ann is not None and not ann.is_rally:
+        if ann is not None and not ann.is_rally and seg.index not in scores:
             continue
         feats = point_features(seg)
-        winner = None
-        if ann and ann.winner_side != "unknown":
+        winner = scores.get(seg.index)
+        if winner is None and ann and ann.winner_side != "unknown":
             winner = team_of_side(seg, ann.winner_side)
         points.append({
             "index": seg.index,
@@ -238,12 +241,14 @@ def aggregate(points: list[dict]) -> dict:
     return out
 
 
-def compute_stats(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo) -> dict:
-    points = build_points(segments, annotations, info)
+def compute_stats(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo,
+                  scores: dict[int, str] | None = None) -> dict:
+    points = build_points(segments, annotations, info, scores)
     sets = sorted({p["set"] for p in points})
     return {
         "teams": {tid: info.team_name(tid) for tid in ("A", "B")},
         "has_annotations": bool(annotations),
+        "winners_from_scoreboard": len(scores or {}),
         "points_count": len(points),
         "avg_point_duration_s": round(mean(p["duration_s"] for p in points), 1) if points else None,
         "overall": aggregate(points),

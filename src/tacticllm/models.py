@@ -18,6 +18,7 @@ class Calibration(BaseModel):
     corners_px: list[list[float]]  # 4 punkty, kolejność jak court.CORNER_NAMES
     kind: Literal["corners", "service"] = "corners"  # patrz court.REFERENCE_POINTS_M
     reference_time_s: float  # klatka z widokiem głównej kamery
+    scoreboard_px: list[float] | None = None  # x1, y1, x2, y2 grafiki z wynikiem (brak = cała klatka)
 
     def court(self):
         import numpy as np
@@ -148,6 +149,7 @@ class RunPaths:
     reference_frame = property(lambda self: self.root / "reference.jpg")
     segments = property(lambda self: self.root / "segments.json")
     annotations = property(lambda self: self.root / "annotations.json")
+    scores = property(lambda self: self.root / "scores.json")
     stats = property(lambda self: self.root / "stats.json")
     heatmaps = property(lambda self: self.root / "heatmaps")
     clips = property(lambda self: self.root / "clips")
@@ -167,6 +169,14 @@ def save_json(path: Path, data) -> None:
 
 def load_segments(path: Path) -> list[Segment]:
     return [Segment.model_validate(s) for s in json.loads(Path(path).read_text(encoding="utf-8"))]
+
+
+def load_scores(path: Path) -> dict[int, TeamId]:
+    """Zwycięzcy punktów odczytani z tablicy wyników (tylko pewne)."""
+    if not Path(path).exists():
+        return {}
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {int(k): v["winner"] for k, v in raw.items() if v.get("winner")}
 
 
 def load_annotations(path: Path) -> dict[int, PointAnnotation]:
