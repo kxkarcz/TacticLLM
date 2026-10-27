@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5vl:7b"
     ollama_fps: float = 3.0  # ile klatek na sekundę punktu ogląda model (cały punkt, od serwisu do końca)
     ollama_max_frames: int = 64  # limit na bardzo długie wymiany (wtedy fps jest zmniejszany)
-    ollama_frame_width: int = 672
+    ollama_frame_width: int = 896  # na kartach 8 GB: 672
 
-    yolo_weights: str = "yolo11m.pt"
+    yolo_weights: str = "yolo11l.pt"
     device: str = "0"  # "0" = pierwsze GPU, "cpu" = bez GPU
     yolo_imgsz: int = 1280  # większa rozdzielczość = lepiej widać dalszą parę
     yolo_conf: float = 0.25
