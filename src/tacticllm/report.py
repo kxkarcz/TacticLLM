@@ -1,4 +1,4 @@
-"""Raport taktyczny i czat z agentem (Agno + Claude)."""
+"""Raport taktyczny i czat z agentem (Agno + Claude / Gemini / Ollama)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,10 @@ INSTRUCTIONS = [
     "Jeśli czegoś nie ma w danych (np. brak adnotacji punktów = brak informacji kto wygrał), "
     "nie wymyślaj – napisz, czego brakuje. Gdy próbka jest mała (<10 punktów), zaznacz to.",
     "Uwzględnij profile zawodników (ręka, strona gry), jeśli są podane – np. leworęczny na revésie.",
+    "Dane mogą obejmować tylko fragment meczu (points_count, czasy start_s). points_won i win_rate dotyczą "
+    "wyłącznie analizowanych punktów – nie pisz, kto wygrał mecz albo set, jeśli dane tego nie pokazują. "
+    "Zwycięzca punktu z winner_source='scoreboard' pochodzi z tablicy wyników (pewny); 'video_model' – z oceny "
+    "modelu (mniej pewny). Numer seta (set) pochodzi z tablicy wyników.",
 ]
 
 REPORT_TEMPLATE = """Napisz raport taktyczny po {language} w Markdown z sekcjami:
@@ -62,6 +66,12 @@ def _model():
 
         return Ollama(id=settings.ollama_report_model, host=settings.ollama_host,
                       options={"num_ctx": settings.ollama_report_ctx, "temperature": 0.3})
+    if settings.report_provider == "gemini":
+        from agno.models.google import Gemini
+
+        return Gemini(id=settings.gemini_report_model, api_key=settings.google_api_key or None, temperature=0.3)
+    if settings.report_provider != "anthropic":
+        raise ValueError(f"Nieznany dostawca raportu: {settings.report_provider} (dostępne: anthropic, gemini, ollama)")
     from agno.models.anthropic import Claude
 
     return Claude(id=settings.report_model, api_key=settings.anthropic_api_key or None)
@@ -109,9 +119,27 @@ def generate_report(run: RunPaths, info: MatchInfo) -> str:
         stats=json.dumps(_compact(stats), ensure_ascii=False, separators=(",", ":")),
     )
     agent = Agent(model=_model(), instructions=INSTRUCTIONS, markdown=True)
-    report = agent.run(prompt).content
+    report = run_with_retry(agent, prompt)
     run.report.write_text(report, encoding="utf-8")
     return report
+
+
+def run_with_retry(agent, prompt: str, attempts: int = 4, wait_s: float = 30.0) -> str:
+    """Agno przy błędzie modelu (np. 503 – przeciążenie) nie rzuca wyjątku, tylko zwraca treść
+    błędu jako odpowiedź. Sprawdzamy status i ponawiamy, a na końcu zgłaszamy błąd – lepiej brak
+    raportu niż raport z komunikatem o błędzie w środku."""
+    import time
+
+    from agno.run.base import RunStatus
+
+    for attempt in range(1, attempts + 1):
+        output = agent.run(prompt)
+        if output.status != RunStatus.error and output.content:
+            return output.content
+        if attempt < attempts:
+            print(f"Model nie odpowiedział (próba {attempt}/{attempts}) – czekam {wait_s * attempt:.0f} s")
+            time.sleep(wait_s * attempt)
+    raise RuntimeError(f"Nie udało się wygenerować raportu: {str(output.content)[:300]}")
 
 
 def chat(run: RunPaths, info: MatchInfo) -> None:

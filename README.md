@@ -64,7 +64,7 @@ Najważniejsze zmienne (pełna lista w [config.py](src/tacticllm/config.py), pre
 
 | Zmienna | Domyślnie | Znaczenie |
 |---|---|---|
-| `TACTIC_REPORT_PROVIDER` | `anthropic` | `anthropic` (Claude) albo `ollama` |
+| `TACTIC_REPORT_PROVIDER` | `anthropic` | `anthropic` (Claude), `gemini` (darmowy plan wystarcza) albo `ollama` |
 | `ANTHROPIC_API_KEY` | – | klucz do raportu przez Claude |
 | `TACTIC_ANNOTATOR` | `ollama` | `ollama` albo `gemini` |
 | `GOOGLE_API_KEY` | – | klucz do Gemini |

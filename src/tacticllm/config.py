@@ -12,9 +12,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     google_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"))
 
-    # raport i czat: "anthropic" (Claude, jedno wywołanie na mecz) albo "ollama" (lokalnie, za darmo)
+    # raport i czat: "anthropic" (Claude), "gemini" (darmowy plan wystarcza – raport to jedno zapytanie)
+    # albo "ollama" (lokalnie, za darmo)
     report_provider: str = "anthropic"
     report_model: str = "claude-sonnet-5-5"
+    gemini_report_model: str = "gemini-3.6-flash"
     ollama_report_model: str = "qwen3:14b"
     ollama_report_ctx: int = 32768
     report_language: str = "polski"
