@@ -25,6 +25,26 @@ def test_split_row():
     assert split_row("BAUTISTA / BERGAMINI 6 3 AD") == ("BAUTISTA / BERGAMINI", ["6", "3", "AD"])
 
 
+@pytest.mark.parametrize("top, bottom, expected", [
+    ("A / B 6 1", "C / D 3 1 AD1", ("40", "AD")),  # przewaga: pusta komórka rywala = 40
+    ("A / B 4 AD 1", "C / D 3", ("AD", "40")),  # licznik przewagi odczytany osobno
+    ("A / B 6 1 D2", "C / D 3 1 D2", ("40", "40")),  # druga równowaga
+    ("A / B 6 1 SP", "C / D 3 1 SP", ("40", "40")),  # star point
+])
+def test_star_point_tokens(top, bottom, expected):
+    reading = parse_board(raw(top, bottom), games_columns=1 if "4 AD" in top else 2)
+    assert (reading.top.points, reading.bottom.points) == expected
+    assert reading.top.name == "A / B"
+
+
+def test_star_point_sequence_gives_winners():
+    rows = [("6 1 40", "3 1 40"), ("6 1", "3 1 AD1"), ("6 1 D2", "3 1 D2"), ("6 1", "3 1 AD2"),
+            ("6 1 SP", "3 1 SP"), ("6 2", "3 1")]
+    boards = [parse_board(raw("A / B " + t, "C / D " + b), 2) for t, b in rows]
+    winners = [point_winner(x, y)[0] for x, y in zip(boards, boards[1:])]
+    assert winners == ["bottom", "top", "bottom", "top", "top"]
+
+
 def test_parse_board_tells_points_from_games():
     # w tej transmisji kolumna punktów znika na początku gema -> 1 kolumna gemów
     raws = [raw("A / B 2", "C / D 2"), raw("A / B 2 0", "C / D 2 0"), raw("A / B 2 15", "C / D 2 0")]

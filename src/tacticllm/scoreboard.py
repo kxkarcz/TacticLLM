@@ -49,11 +49,21 @@ do prawej, oddzielone spacjami (np. "KOWALSKI / NOWAK 6 3 40"). Pomiń symbole i
 Jeśli tablicy nie widać, visible = false. Odpowiedz wyłącznie JSON-em."""
 
 
+# "star point" (Premier Padel): 40-40 -> AD1 -> D2 -> AD2 -> SP (punkt decydujący). Numer przy
+# AD / D to tylko licznik równowag – D2 i SP to po prostu 40-40.
+_DEUCE = re.compile(r"\bAD\s*\d\b|\bD\d\b|\bSP\b")
+
+
+def _deuce_token(match: re.Match) -> str:
+    return " AD " if match.group().startswith("AD") else " 40 "
+
+
 def split_row(text: str) -> tuple[str, list[str]]:
     """'GONZALEZ / CAMPAGNOLO 2 15' -> ('GONZALEZ / CAMPAGNOLO', ['2', '15'])."""
-    tokens = re.findall(r"\bAD\b|\bA\b(?=\s*$)|\d+", text.upper())
+    text = _DEUCE.sub(_deuce_token, text.upper())
+    tokens = re.findall(r"\bAD\b|\bA\b(?=\s*$)|\d+", text)
     name = re.sub(r"\bAD\b|\d+", " ", text).strip(" -|·*")
-    return re.sub(r"\s+", " ", name), tokens
+    return re.sub(r"\s+", " ", name).strip(), tokens
 
 
 def parse_board(raw: RawScoreboard, games_columns: int) -> ScoreReading:
@@ -64,6 +74,11 @@ def parse_board(raw: RawScoreboard, games_columns: int) -> ScoreReading:
     (top_name, top), (bottom_name, bottom) = split_row(raw.top), split_row(raw.bottom)
     if not top or not bottom:
         return ScoreReading(visible=False)
+    # przy przewadze rywal ma pustą komórkę punktów – czyli 40
+    if len(top) == len(bottom) + 1 and top[-1] in ("AD", "A"):
+        bottom = bottom + ["40"]
+    elif len(bottom) == len(top) + 1 and bottom[-1] in ("AD", "A"):
+        top = top + ["40"]
     with_points = (len(top) == len(bottom) == games_columns + 1
                    or (len(top) == len(bottom) and (top[-1] in POINT_TOKENS or bottom[-1] in POINT_TOKENS)))
 
@@ -220,6 +235,12 @@ def read_scores(video: Path, segments: list[Segment], box: list[float] | None, i
     t, raw = reader.read_near(duration - 0.5, max(0.0, duration - 8), duration - 0.1)
     times.append(t)
     raws.append(raw)
+    return score_points(segments, times, raws, info)
+
+
+def score_points(segments: list[Segment], times: list[float], raws: list[RawScoreboard],
+                 info: MatchInfo) -> dict[int, dict]:
+    """Zwycięzcy punktów z przepisanych tablic: raws[i] przed punktem i, ostatni – po ostatnim punkcie."""
     readings = list(zip(times, parse_all(raws)))
 
     rows = next((m for _, r in readings if (m := match_rows(r, info))), None)
