@@ -102,43 +102,53 @@ def point_features(seg: Segment) -> dict:
     return result
 
 
-def set_of(seg: Segment, ann: PointAnnotation | None, info: MatchInfo) -> int:
+def set_of(seg: Segment, ann: PointAnnotation | None, info: MatchInfo, board_set: int | None = None) -> int:
+    """Kolejność źródeł: ręcznie podane początki setów, tablica wyników, opis modelu."""
+    if info.set_starts_s:
+        starts = sorted(info.set_starts_s)
+        return max([i + 1 for i, s in enumerate(starts) if seg.start_s >= s], default=1)
+    if board_set:
+        return board_set
     if ann and ann.set_number:
         return ann.set_number
-    starts = sorted(info.set_starts_s)
-    return max([i + 1 for i, s in enumerate(starts) if seg.start_s >= s], default=1)
+    return 1
 
 
 def build_points(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo,
-                 scores: dict[int, str] | None = None) -> list[dict]:
-    """scores: zwycięzcy z tablicy wyników – pewniejsi niż ocena modelu wizyjnego, więc mają pierwszeństwo."""
+                 scores: dict[int, dict] | None = None) -> list[dict]:
+    """scores: odczyty tablicy wyników (models.load_scores). Zwycięzca z tablicy jest pewniejszy niż
+    ocena modelu wizyjnego, więc ma pierwszeństwo. Gdy opis modelu wskazuje innego zwycięzcę, jego
+    zakończenie, ostatnie uderzenie i przebieg dotyczą złej pary – nie wchodzą do statystyk."""
     scores = scores or {}
     points = []
     for seg in segments:
         ann = annotations.get(seg.index)
-        if ann is not None and not ann.is_rally and seg.index not in scores:
+        board = scores.get(seg.index, {})
+        if ann is not None and not ann.is_rally and not board.get("winner"):
             continue
         feats = point_features(seg)
-        winner = scores.get(seg.index)
-        if winner is None and ann and ann.winner_side != "unknown":
-            winner = team_of_side(seg, ann.winner_side)
+        ann_winner = team_of_side(seg, ann.winner_side) if ann and ann.winner_side != "unknown" else None
+        winner = board.get("winner") or ann_winner
+        conflict = bool(board.get("winner") and ann_winner and ann_winner != board["winner"])
+        described = ann if ann and not conflict else None
         points.append({
             "index": seg.index,
             "start_s": seg.start_s,
             "duration_s": round(seg.duration, 1),
-            "set": set_of(seg, ann, info),
+            "set": set_of(seg, ann, info, board.get("set")),
             "near_team": seg.near_team,
             "winner": winner,
-            "ending": ann.ending if ann else None,
-            "last_shot": ann.last_shot if ann else None,
+            "winner_source": "scoreboard" if board.get("winner") else ("video_model" if ann_winner else None),
+            "ending": described.ending if described else None,
+            "last_shot": described.last_shot if described else None,
             "shots": ann.shots if ann else None,
             "lobs": ({team_of_side(seg, "near"): ann.lobs_near, team_of_side(seg, "far"): ann.lobs_far}
                      if ann else None),
             "server": team_of_side(seg, ann.server_side) if ann and ann.server_side != "unknown" else None,
             "tactics": ({team_of_side(seg, "near"): list(ann.tactics_near), team_of_side(seg, "far"): list(ann.tactics_far)}
                         if ann else None),
-            "decisive_moment": ann.decisive_moment if ann else None,
-            "notes": ann.notes if ann else None,
+            "decisive_moment": described.decisive_moment if described else None,
+            "notes": described.notes if described else None,
             "teams": feats,
         })
     return points
@@ -242,13 +252,13 @@ def aggregate(points: list[dict]) -> dict:
 
 
 def compute_stats(segments: list[Segment], annotations: dict[int, PointAnnotation], info: MatchInfo,
-                  scores: dict[int, str] | None = None) -> dict:
+                  scores: dict[int, dict] | None = None) -> dict:
     points = build_points(segments, annotations, info, scores)
     sets = sorted({p["set"] for p in points})
     return {
         "teams": {tid: info.team_name(tid) for tid in ("A", "B")},
         "has_annotations": bool(annotations),
-        "winners_from_scoreboard": len(scores or {}),
+        "winners_from_scoreboard": sum(p["winner_source"] == "scoreboard" for p in points),
         "points_count": len(points),
         "avg_point_duration_s": round(mean(p["duration_s"] for p in points), 1) if points else None,
         "overall": aggregate(points),

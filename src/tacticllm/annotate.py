@@ -99,7 +99,8 @@ class GeminiAnnotator:
     def __call__(self, seg: Segment) -> PointAnnotation:
         from google.genai import types
 
-        clip = self.clips_dir / f"point_{seg.index:04d}.mp4"
+        # czas w nazwie: po ponownym podziale na punkty numery się przesuwają, a stary klip byłby innym punktem
+        clip = self.clips_dir / f"point_{seg.index:04d}_{seg.start_s:.0f}-{seg.end_s:.0f}s.mp4"
         if not clip.exists():
             cut(self.video, clip, max(0.0, seg.start_s - self.pad_s), seg.end_s + self.pad_s, max_height=720)
         response = self._generate(

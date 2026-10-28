@@ -145,7 +145,7 @@ def stats(run: Path = RunOpt, match: Optional[Path] = MatchOpt):
 
 @app.command()
 def report(run: Path = RunOpt, match: Optional[Path] = MatchOpt):
-    """Generuje raport taktyczny dla trenera (Agno + Claude)."""
+    """Generuje raport taktyczny dla trenera (TACTIC_REPORT_PROVIDER: anthropic / gemini / ollama)."""
     from .report import generate_report
 
     paths = RunPaths(run)
@@ -200,10 +200,11 @@ def points(run: Path = RunOpt):
 
     paths = RunPaths(run)
     anns = load_annotations(paths.annotations)
-    winners = load_scores(paths.scores)
+    board = load_scores(paths.scores)
     for seg in load_segments(paths.segments):
         ann = anns.get(seg.index)
-        extra = f" | wygrała para {winners[seg.index]}" if seg.index in winners else ""
+        winner = board.get(seg.index, {}).get("winner")
+        extra = f" | wygrała para {winner}" if winner else ""
         extra += f" | {ann.winner_side} {ann.ending} {ann.last_shot}" if ann else ""
         print(f"#{seg.index:3d}  {format_time(seg.start_s)}–{format_time(seg.end_s)}  "
               f"bliżej: para {seg.near_team}  obs: {len(seg.observations)}{extra}")

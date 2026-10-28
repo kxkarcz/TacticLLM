@@ -80,8 +80,33 @@ def test_rally_start_after_serve_setup():
 
 def test_scoreboard_winner_beats_model_guess():
     seg = Segment(index=0, start_s=0, end_s=5, near_team="A")
-    ann = {0: PointAnnotation(is_rally=False, winner_side="near", ending="winner", last_shot="smash")}
+    ann = {0: PointAnnotation(is_rally=False, winner_side="near", ending="winner", last_shot="smash",
+                              notes="A kończy smeczem", set_number=3)}
     # tablica mówi, że punkt był i wygrała go para B – to wygrywa z oceną modelu
-    points = build_points([seg], ann, MatchInfo(), scores={0: "B"})
-    assert len(points) == 1 and points[0]["winner"] == "B"
+    (point,) = build_points([seg], ann, MatchInfo(), scores={0: {"winner": "B", "set": 1}})
+    assert point["winner"] == "B" and point["winner_source"] == "scoreboard"
+    # opis modelu dotyczy złej pary – jego zakończenie i przebieg nie mogą trafić do statystyk
+    assert point["ending"] is None and point["last_shot"] is None and point["notes"] is None
+    assert point["set"] == 1  # numer seta z tablicy, nie z opisu modelu
     assert build_points([seg], ann, MatchInfo()) == []  # bez tablicy: model mówi "nie punkt"
+
+
+def test_model_description_kept_when_it_agrees_with_scoreboard():
+    seg = Segment(index=0, start_s=0, end_s=5, near_team="A")
+    ann = {0: PointAnnotation(is_rally=True, winner_side="near", ending="winner", last_shot="smash")}
+    (point,) = build_points([seg], ann, MatchInfo(), scores={0: {"winner": "A", "set": 2}})
+    assert point["ending"] == "winner" and point["last_shot"] == "smash" and point["set"] == 2
+
+
+def test_load_scores_reads_set_from_board(tmp_path):
+    import json
+
+    from tacticllm.models import load_scores
+
+    path = tmp_path / "scores.json"
+    path.write_text(json.dumps({
+        "0": {"winner": "A", "before": {"visible": True, "top": {"games": [6, 2], "points": "15"}}},
+        "1": {"winner": None, "before": {"visible": False, "top": None}},
+    }), encoding="utf-8")
+    assert load_scores(path) == {0: {"winner": "A", "set": 2}, 1: {"winner": None, "set": None}}
+    assert load_scores(tmp_path / "brak.json") == {}

@@ -171,12 +171,19 @@ def load_segments(path: Path) -> list[Segment]:
     return [Segment.model_validate(s) for s in json.loads(Path(path).read_text(encoding="utf-8"))]
 
 
-def load_scores(path: Path) -> dict[int, TeamId]:
-    """Zwycięzcy punktów odczytani z tablicy wyników (tylko pewne)."""
+def load_scores(path: Path) -> dict[int, dict]:
+    """Z tablicy wyników: {indeks: {"winner": "A"/"B"/None, "set": numer seta albo None}}.
+
+    Numer seta = liczba kolumn z gemami na tablicy przed punktem.
+    """
     if not Path(path).exists():
         return {}
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    return {int(k): v["winner"] for k, v in raw.items() if v.get("winner")}
+    result = {}
+    for k, v in raw.items():
+        top = (v.get("before") or {}).get("top") or {}
+        result[int(k)] = {"winner": v.get("winner"), "set": len(top["games"]) if top.get("games") else None}
+    return result
 
 
 def load_annotations(path: Path) -> dict[int, PointAnnotation]:
